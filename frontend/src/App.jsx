@@ -1,6 +1,125 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 
 const API_BASE = '/api'
+
+function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) {
+  const width = 260
+  const height = 260
+
+  const edges = useMemo(() => {
+    const result = []
+    if (!cities || !cities.length || !distanceMatrix || !distanceMatrix.length) return result
+    for (let i = 0; i < cities.length; i++) {
+      for (let j = i + 1; j < cities.length; j++) {
+        const c1 = cities[i]
+        const c2 = cities[j]
+        const p1 = positions?.[c1]
+        const p2 = positions?.[c2]
+        if (!p1 || !p2) continue
+        const d = distanceMatrix[i]?.[j]
+        if (d == null) continue
+        result.push({
+          x1: p1.x,
+          y1: p1.y,
+          x2: p2.x,
+          y2: p2.y,
+          label: d,
+        })
+      }
+    }
+    return result
+  }, [cities, distanceMatrix, positions])
+
+  const routePoints = useMemo(() => {
+    if (!homeCity || !positions || !Object.keys(positions).length) return ''
+    const fullRoute = [homeCity, ...(routeBetween || []), homeCity]
+    if (fullRoute.length < 2) return ''
+    return fullRoute
+      .map((city) => {
+        const p = positions[city]
+        return p ? `${p.x},${p.y}` : ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }, [homeCity, routeBetween, positions])
+
+  if (!cities.length || !positions || !Object.keys(positions).length) {
+    return (
+      <div className="panel-body map-body">
+        <p className="map-caption">Map will appear after a round is generated.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="panel-body map-body">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="city-map"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {edges.map((e, idx) => (
+          <g key={idx} className="edge">
+            <line
+              className="edge-line"
+              x1={e.x1}
+              y1={e.y1}
+              x2={e.x2}
+              y2={e.y2}
+            />
+            <text
+              className="edge-label"
+              x={(e.x1 + e.x2) / 2}
+              y={(e.y1 + e.y2) / 2 - 3}
+            >
+              {e.label}
+            </text>
+          </g>
+        ))}
+
+        {routePoints && (
+          <polyline
+            className="route-line-svg"
+            points={routePoints}
+          />
+        )}
+
+        {/* City dots on top */}
+        {cities.map((city) => {
+          const pos = positions[city]
+          if (!pos) return null
+          const isHome = city === homeCity
+
+          return (
+            <g key={city} className="city-node">
+              <circle
+                cx={pos.x}
+                cy={pos.y}
+                r={isHome ? 11 : 8}
+                className={
+                  'city-dot ' + (isHome ? 'home-dot' : '')
+                }
+              />
+              <text
+                x={pos.x}
+                y={pos.y + 3}
+                className="city-label-svg"
+              >
+                {city}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+
+      <p className="map-caption">
+        This is a random map for this round. Each line shows the distance between two cities
+        (from the generated distance matrix). The glowing path is your current route
+        (home → cities → home).
+      </p>
+    </div>
+  )
+}
 
 function App() {
   const [playerName, setPlayerName] = useState('')
@@ -13,6 +132,20 @@ function App() {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [cityPositions, setCityPositions] = useState({})
+
+  const generateRandomPositions = (cityList) => {
+    const width = 260
+    const height = 260
+    const margin = 30
+    const positions = {}
+    cityList.forEach((city) => {
+      const x = margin + Math.random() * (width - margin * 2)
+      const y = margin + Math.random() * (height - margin * 2)
+      positions[city] = { x, y }
+    })
+    return positions
+  }
 
   const startNewGame = async () => {
     setError(null)
@@ -38,6 +171,9 @@ function App() {
       setDistanceMatrix(data.distanceMatrix)
       setSelectedCities([])
       setRouteBetween([])
+
+      const positions = generateRandomPositions(data.cities)
+      setCityPositions(positions)
     } catch (e) {
       setError(e.message)
     }
@@ -183,8 +319,10 @@ function App() {
               </button>
 
               <p className="hint-text">
-                A new round generates a fresh distance grid and a random home city between{' '}
-                <strong>A</strong> and <strong>J</strong>.
+                A new round generates a fresh random distance matrix (50–100 km between each pair of
+                cities) and a random home city between <strong>A</strong> and <strong>J</strong>.
+                The matrix powers all the algorithms. On the right you see the same data as a random
+                map and as a distance grid.
               </p>
             </div>
           </div>
@@ -289,18 +427,35 @@ function App() {
           )}
         </section>
 
-        {/* RIGHT COLUMN */}
         <section className="column column-right">
           {distanceMatrix.length > 0 && (
-            <div className="panel panel-matrix">
-              <div className="panel-header">
-                <h2>Distance Grid</h2>
-                <span className="badge badge-soft">
-                  50 – 100 km • Generated this round
-                </span>
+            <>
+              <div className="panel panel-map">
+                <div className="panel-header">
+                  <h2>City Distance Map</h2>
+                  <span className="badge badge-soft">
+                    Random layout • Line labels are distances
+                  </span>
+                </div>
+                <CityMap
+                  cities={cities}
+                  homeCity={homeCity}
+                  routeBetween={routeBetween}
+                  distanceMatrix={distanceMatrix}
+                  positions={cityPositions}
+                />
               </div>
-              {renderMatrix()}
-            </div>
+
+              <div className="panel panel-matrix">
+                <div className="panel-header">
+                  <h2>Distance Grid</h2>
+                  <span className="badge badge-soft">
+                    Same data as map • 50–100 km
+                  </span>
+                </div>
+                {renderMatrix()}
+              </div>
+            </>
           )}
 
           {error && (
@@ -387,6 +542,8 @@ function formatAlgoName(name) {
   switch (name) {
     case 'bruteforce':
       return 'Brute Force (Exact)'
+    case 'mst_prim':
+      return 'MST using Prim’s'
     case 'nearest_neighbor':
       return 'Nearest Neighbor'
     case 'random_search':
@@ -405,9 +562,9 @@ function ComplexityInfo() {
       setLoading(true)
       const res = await fetch('/api/complexity')
       const json = await res.json()
+      console.log(json);
       setData(json)
     } catch {
-      // ignore
     } finally {
       setLoading(false)
     }
@@ -424,19 +581,27 @@ function ComplexityInfo() {
   return (
     <ul className="complexity-list">
       <li>
-        <span className="complexity-title">Brute Force</span>
+        <span className="complexity-title">Brute Force (Exact)</span>
         <span className="complexity-body">{data.bruteforce}</span>
       </li>
+
       <li>
-        <span className="complexity-title">Nearest Neighbor</span>
+        <span className="complexity-title">MST using Prim’s Algorithm</span>
+        <span className="complexity-body">{data.mst_prim}</span>
+      </li>
+
+      <li>
+        <span className="complexity-title">Nearest Neighbor (Greedy)</span>
         <span className="complexity-body">{data.nearest_neighbor}</span>
       </li>
+
       <li>
-        <span className="complexity-title">Random Search</span>
+        <span className="complexity-title">Random Search (Monte Carlo)</span>
         <span className="complexity-body">{data.random_search}</span>
       </li>
     </ul>
   )
+
 }
 
 export default App
