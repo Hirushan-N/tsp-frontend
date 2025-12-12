@@ -662,3 +662,8 @@ input:focus {
     width: 100%;
   }
 }
+
+.recharts-wrapper {
+  font-size: 12px;
+}
+

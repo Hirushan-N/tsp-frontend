@@ -1,4 +1,14 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  CartesianGrid,
+} from 'recharts'
 
 const API_BASE = '/api'
 
@@ -8,7 +18,8 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
 
   const edges = useMemo(() => {
     const result = []
-    if (!cities || !cities.length || !distanceMatrix || !distanceMatrix.length) return result
+    if (!cities?.length || !distanceMatrix?.length) return result
+
     for (let i = 0; i < cities.length; i++) {
       for (let j = i + 1; j < cities.length; j++) {
         const c1 = cities[i]
@@ -18,6 +29,7 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
         if (!p1 || !p2) continue
         const d = distanceMatrix[i]?.[j]
         if (d == null) continue
+
         result.push({
           x1: p1.x,
           y1: p1.y,
@@ -34,6 +46,7 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
     if (!homeCity || !positions || !Object.keys(positions).length) return ''
     const fullRoute = [homeCity, ...(routeBetween || []), homeCity]
     if (fullRoute.length < 2) return ''
+
     return fullRoute
       .map((city) => {
         const p = positions[city]
@@ -60,31 +73,15 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
       >
         {edges.map((e, idx) => (
           <g key={idx} className="edge">
-            <line
-              className="edge-line"
-              x1={e.x1}
-              y1={e.y1}
-              x2={e.x2}
-              y2={e.y2}
-            />
-            <text
-              className="edge-label"
-              x={(e.x1 + e.x2) / 2}
-              y={(e.y1 + e.y2) / 2 - 3}
-            >
+            <line className="edge-line" x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} />
+            <text className="edge-label" x={(e.x1 + e.x2) / 2} y={(e.y1 + e.y2) / 2 - 3}>
               {e.label}
             </text>
           </g>
         ))}
 
-        {routePoints && (
-          <polyline
-            className="route-line-svg"
-            points={routePoints}
-          />
-        )}
+        {routePoints && <polyline className="route-line-svg" points={routePoints} />}
 
-        {/* City dots on top */}
         {cities.map((city) => {
           const pos = positions[city]
           if (!pos) return null
@@ -96,15 +93,9 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
                 cx={pos.x}
                 cy={pos.y}
                 r={isHome ? 11 : 8}
-                className={
-                  'city-dot ' + (isHome ? 'home-dot' : '')
-                }
+                className={'city-dot ' + (isHome ? 'home-dot' : '')}
               />
-              <text
-                x={pos.x}
-                y={pos.y + 3}
-                className="city-label-svg"
-              >
+              <text x={pos.x} y={pos.y + 3} className="city-label-svg">
                 {city}
               </text>
             </g>
@@ -113,12 +104,201 @@ function CityMap({ cities, homeCity, routeBetween, distanceMatrix, positions }) 
       </svg>
 
       <p className="map-caption">
-        This is a random map for this round. Each line shows the distance between two cities
-        (from the generated distance matrix). The glowing path is your current route
-        (home → cities → home).
+        This is a random map for this round. Each line shows the distance between two cities (from
+        the generated distance matrix). The glowing path is your current route (home → cities →
+        home).
       </p>
     </div>
   )
+}
+
+function PerformanceChart() {
+  const [data, setData] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const load = async () => {
+    setErr(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/performance?limit=15')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to load performance')
+
+      const rounds = (json.rounds || []).map((r) => ({
+        ...r,
+        roundLabel: `#${r.sessionId}`,
+      }))
+      setData(rounds)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  const fmt = (v) => (v === null || v === undefined ? '—' : Number(v).toFixed(3))
+
+  return (
+    <div className="panel-body">
+      {err && (
+        <div className="toast toast-error">
+          <strong>Error:</strong> {err}
+        </div>
+      )}
+
+      <div className="button-row" style={{ marginBottom: 10 }}>
+        <button className="btn btn-ghost" onClick={load} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+        <span className="badge badge-soft">{data.length || 0} rounds</span>
+      </div>
+
+      {!data.length && !err && (
+        <p className="hint-text">
+          No rounds found yet. Play a few rounds and come back — the chart + table will auto-fill.
+        </p>
+      )}
+
+      {!!data.length && (
+        <>
+          {/* CHART */}
+          <div style={{ width: '100%', height: 320 }}>
+            <ResponsiveContainer>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="roundLabel" />
+                <YAxis label={{ value: 'Time (ms)', angle: -90, position: 'insideLeft' }} />
+                <Tooltip
+                  formatter={(value) =>
+                    value === null || value === undefined ? '—' : `${Number(value).toFixed(3)} ms`
+                  }
+                />
+                <Legend />
+                <Line type="monotone" dataKey="bruteforce" name="Brute Force" dot={false} />
+                <Line
+                  type="monotone"
+                  dataKey="nearest_neighbor"
+                  name="Nearest Neighbor"
+                  dot={false}
+                />
+                <Line type="monotone" dataKey="mst_prim" name="MST (Prim)" dot={false} />
+                <Line type="monotone" dataKey="random_search" name="Random Search" dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* TABLE (SAME DATA USED BY CHART) */}
+          <h3 className="section-heading" style={{ marginTop: 14 }}>
+            Raw Data Used for the Chart (Last 15 Rounds)
+          </h3>
+
+          <div className="panel-body scrollable">
+            <table className="matrix algo-table">
+              <thead>
+                <tr>
+                  <th>Round</th>
+                  <th>Session ID</th>
+                  <th>Home</th>
+                  <th>Brute Force (ms)</th>
+                  <th>Nearest Neighbor (ms)</th>
+                  <th>MST Prim (ms)</th>
+                  <th>Random Search (ms)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((r, idx) => (
+                  <tr key={r.sessionId}>
+                    <td>{idx + 1}</td>
+                    <td>#{r.sessionId}</td>
+                    <td>{r.homeCity || '—'}</td>
+                    <td>{fmt(r.bruteforce)}</td>
+                    <td>{fmt(r.nearest_neighbor)}</td>
+                    <td>{fmt(r.mst_prim)}</td>
+                    <td>{fmt(r.random_search)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="small-note" style={{ marginTop: 10 }}>
+            The table values are fetched from <code>/api/performance?limit=15</code> and plotted in the
+            chart above. If fewer than 15 rounds exist, it shows what is available.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ComplexityInfo() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const load = async () => {
+    try {
+      setLoading(true)
+      const res = await fetch('/api/complexity')
+      const json = await res.json()
+      setData(json)
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!data) {
+    return (
+      <button className="btn btn-ghost" onClick={load} disabled={loading}>
+        {loading ? 'Loading…' : 'Reveal complexity'}
+      </button>
+    )
+  }
+
+  return (
+    <ul className="complexity-list">
+      <li>
+        <span className="complexity-title">Brute Force (Exact)</span>
+        <span className="complexity-body">{data.bruteforce}</span>
+      </li>
+
+      <li>
+        <span className="complexity-title">MST using Prim’s Algorithm</span>
+        <span className="complexity-body">{data.mst_prim}</span>
+      </li>
+
+      <li>
+        <span className="complexity-title">Nearest Neighbor (Greedy)</span>
+        <span className="complexity-body">{data.nearest_neighbor}</span>
+      </li>
+
+      <li>
+        <span className="complexity-title">Random Search (Monte Carlo)</span>
+        <span className="complexity-body">{data.random_search}</span>
+      </li>
+    </ul>
+  )
+}
+
+function formatAlgoName(name) {
+  switch (name) {
+    case 'bruteforce':
+      return 'Brute Force (Exact)'
+    case 'mst_prim':
+      return 'MST using Prim’s'
+    case 'nearest_neighbor':
+      return 'Nearest Neighbor'
+    case 'random_search':
+      return 'Random Search'
+    default:
+      return name
+  }
 }
 
 function App() {
@@ -139,11 +319,13 @@ function App() {
     const height = 260
     const margin = 30
     const positions = {}
+
     cityList.forEach((city) => {
       const x = margin + Math.random() * (width - margin * 2)
       const y = margin + Math.random() * (height - margin * 2)
       positions[city] = { x, y }
     })
+
     return positions
   }
 
@@ -186,7 +368,6 @@ function App() {
     setSelectedCities((prev) => {
       const exists = prev.includes(city)
       const next = exists ? prev.filter((c) => c !== city) : [...prev, city]
-
       setRouteBetween((rb) => rb.filter((c) => next.includes(c)))
       return next
     })
@@ -195,11 +376,7 @@ function App() {
   const addToRoute = (city) => {
     if (!selectedCities.includes(city)) return
     setResult(null)
-
-    setRouteBetween((prev) => {
-      if (prev.includes(city)) return prev
-      return [...prev, city]
-    })
+    setRouteBetween((prev) => (prev.includes(city) ? prev : [...prev, city]))
   }
 
   const clearRoute = () => {
@@ -272,8 +449,7 @@ function App() {
     )
   }
 
-  const step =
-    !sessionId ? 1 : sessionId && !selectedCities.length ? 2 : !result ? 3 : 4
+  const step = !sessionId ? 1 : sessionId && !selectedCities.length ? 2 : !result ? 3 : 4
 
   return (
     <div className="app-root">
@@ -281,9 +457,7 @@ function App() {
       <header className="top-header">
         <div>
           <h1 className="game-title">Traveling Salesman Arena</h1>
-          <p className="subtitle">
-            Pick cities, plan your route, and beat the algorithms.
-          </p>
+          <p className="subtitle">Pick cities, plan your route, and beat the algorithms.</p>
         </div>
         <div className="badge-row">
           <span className="badge badge-outline">
@@ -319,10 +493,8 @@ function App() {
               </button>
 
               <p className="hint-text">
-                A new round generates a fresh random distance matrix (50–100 km between each pair of
-                cities) and a random home city between <strong>A</strong> and <strong>J</strong>.
-                The matrix powers all the algorithms. On the right you see the same data as a random
-                map and as a distance grid.
+                A new round generates a random distance matrix (50–100 km) and a random home city (A–J).
+                On the right you see the same data as a random map and as a distance grid.
               </p>
             </div>
           </div>
@@ -335,8 +507,7 @@ function App() {
               </div>
               <div className="panel-body">
                 <p className="hint-text">
-                  Pick your target cities. You must start and end at{' '}
-                  <strong>{homeCity}</strong>.
+                  Pick your target cities. You must start and end at <strong>{homeCity}</strong>.
                 </p>
                 <div className="city-grid">
                   {cities.map((c) => (
@@ -361,9 +532,7 @@ function App() {
                     </button>
                   ))}
                 </div>
-                <p className="small-note">
-                  You can choose up to 8 cities to keep the game fast.
-                </p>
+                <p className="small-note">You can choose up to 8 cities to keep the game fast.</p>
               </div>
             </div>
           )}
@@ -376,17 +545,15 @@ function App() {
               </div>
               <div className="panel-body">
                 <p className="hint-text">
-                  Tap the selected cities in the order you want to visit them. Each city can only
-                  appear once.
+                  Tap the selected cities in the order you want to visit them. Each city can only appear
+                  once.
                 </p>
                 <div className="city-grid route-grid">
                   {selectedCities.map((c) => (
                     <button
                       key={c}
                       onClick={() => addToRoute(c)}
-                      className={
-                        'route-chip ' + (routeBetween.includes(c) ? 'route-chip-used' : '')
-                      }
+                      className={'route-chip ' + (routeBetween.includes(c) ? 'route-chip-used' : '')}
                     >
                       {c}
                     </button>
@@ -414,11 +581,7 @@ function App() {
                   <button className="btn btn-ghost" onClick={clearRoute}>
                     Reset path
                   </button>
-                  <button
-                    className="btn btn-accent"
-                    onClick={submitAnswer}
-                    disabled={loading}
-                  >
+                  <button className="btn btn-accent" onClick={submitAnswer} disabled={loading}>
                     {loading ? 'Running algorithms…' : 'Lock in & check'}
                   </button>
                 </div>
@@ -433,9 +596,7 @@ function App() {
               <div className="panel panel-map">
                 <div className="panel-header">
                   <h2>City Distance Map</h2>
-                  <span className="badge badge-soft">
-                    Random layout • Line labels are distances
-                  </span>
+                  <span className="badge badge-soft">Random layout • Line labels are distances</span>
                 </div>
                 <CityMap
                   cities={cities}
@@ -449,9 +610,7 @@ function App() {
               <div className="panel panel-matrix">
                 <div className="panel-header">
                   <h2>Distance Grid</h2>
-                  <span className="badge badge-soft">
-                    Same data as map • 50–100 km
-                  </span>
+                  <span className="badge badge-soft">Same data as map • 50–100 km</span>
                 </div>
                 {renderMatrix()}
               </div>
@@ -468,11 +627,7 @@ function App() {
             <div className="panel panel-result">
               <div className="panel-header">
                 <h2>Round Results</h2>
-                <span
-                  className={
-                    'result-pill ' + (result.correct ? 'result-pill-win' : 'result-pill-lose')
-                  }
-                >
+                <span className={'result-pill ' + (result.correct ? 'result-pill-win' : 'result-pill-lose')}>
                   {result.correct ? 'Perfect Route!' : 'Better path exists'}
                 </span>
               </div>
@@ -523,6 +678,14 @@ function App() {
             </div>
           )}
 
+          <div className="panel">
+            <div className="panel-header">
+              <h2>Performance (Last 15 Rounds)</h2>
+              <span className="badge badge-soft">Time chart from DB</span>
+            </div>
+            <PerformanceChart />
+          </div>
+
           <div className="panel panel-complexity">
             <div className="panel-header">
               <h2>Algorithm Complexity</h2>
@@ -536,72 +699,6 @@ function App() {
       </main>
     </div>
   )
-}
-
-function formatAlgoName(name) {
-  switch (name) {
-    case 'bruteforce':
-      return 'Brute Force (Exact)'
-    case 'mst_prim':
-      return 'MST using Prim’s'
-    case 'nearest_neighbor':
-      return 'Nearest Neighbor'
-    case 'random_search':
-      return 'Random Search'
-    default:
-      return name
-  }
-}
-
-function ComplexityInfo() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  const load = async () => {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/complexity')
-      const json = await res.json()
-      console.log(json);
-      setData(json)
-    } catch {
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (!data) {
-    return (
-      <button className="btn btn-ghost" onClick={load} disabled={loading}>
-        {loading ? 'Loading…' : 'Reveal complexity'}
-      </button>
-    )
-  }
-
-  return (
-    <ul className="complexity-list">
-      <li>
-        <span className="complexity-title">Brute Force (Exact)</span>
-        <span className="complexity-body">{data.bruteforce}</span>
-      </li>
-
-      <li>
-        <span className="complexity-title">MST using Prim’s Algorithm</span>
-        <span className="complexity-body">{data.mst_prim}</span>
-      </li>
-
-      <li>
-        <span className="complexity-title">Nearest Neighbor (Greedy)</span>
-        <span className="complexity-body">{data.nearest_neighbor}</span>
-      </li>
-
-      <li>
-        <span className="complexity-title">Random Search (Monte Carlo)</span>
-        <span className="complexity-body">{data.random_search}</span>
-      </li>
-    </ul>
-  )
-
 }
 
 export default App
